@@ -1,0 +1,220 @@
+---
+- hosts: all
+  become: yes
+  
+  vars_files:
+    - my_vault.yml
+
+  vars:
+    - ansible_become_pass: "{{ su_password }}"
+
+  pre_tasks:
+    - name: Ensure the locale exists
+      tags: locale
+      locale_gen:
+        name: en_US.UTF-8
+        state: present
+    - name: set default locale
+      tags: locale
+      command: localectl set-locale LANG=en_US.UTF-8 
+
+    - name: install updates
+      apt: 
+        upgrade: yes
+        update_cache: yes
+      when: ansible_distribution == "Debian"
+
+    - name: Install Zabbix repository
+      apt:
+        deb: https://repo.zabbix.com/zabbix/6.4/debian/pool/main/z/zabbix-release/zabbix-release_6.4-1+debian12_all.deb
+
+    - name: Update cache
+      apt:
+        update_cache: yes
+
+
+- hosts: server
+  tags: server
+  become: true
+  tasks:
+    - name: Install zabbix server
+      apt: 
+        name:
+          - zabbix-server-pgsql
+          - zabbix-agent
+
+    - name: Configure the database for ZABBIX server - set host
+      tags: config
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf 
+        regexp: "^# DBHost="
+        line: DBHost=192.168.56.11
+        state: present
+
+    - name: Configure the database for ZABBIX server - set password
+      tags: config
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf 
+        regexp: "^# DBPassword="
+        line: DBPassword=zabbix
+        state: present
+
+
+- hosts: db
+  become: true
+  vars_files:
+    - vars.yml
+
+  pre_tasks:
+    - name: Install postgres packages
+      tags: postgres
+      apt: "name={{ item }} state=present"
+      with_items:
+        - postgresql
+        - postgresql-client
+        - python3-psycopg2
+
+    - name: Install ZABBIX packages
+      tags: zabbix
+      apt: "name={{ item }}  state=present"
+      with_items:
+        - zabbix-sql-scripts 
+        - zabbix-agent
+
+  tasks:
+    #     - name: Find out if PostgreSQL is initialized
+    #       ansible.builtin.stat:
+    #         path: "/var/lib/pgsql/data/pg_hba.conf"
+    #       register: postgres_data
+    # 
+    #     - name: Initialize PostgreSQL
+    #       shell: "postgresql-setup initdb"
+    #       when: not postgres_data.stat.exists
+    # 
+    #     - name: Start and enable PostgreSQL service 
+    #       service: "name={{ item }} state=started enabled=yes"
+    #       with_items:
+    #         - postgresql
+    #
+    # Not needed for Debian since postgres is already set up and running
+    # https://superuser.com/questions/513386/setting-up-postgresql-gives-error-sudo-initdb-command-not-found
+    
+    - name: Create PostgreSQL user zabbix
+      tags: createpostgres
+      become_user: postgres
+      postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        state: present
+
+    - name: Create PostgreSQL database 'zabbix'
+      become: yes
+      become_user: postgres
+      ansible.builtin.postgresql_db:
+        name: zabbix
+        owner: zabbix
+        state: present
+
+    - name: Import zabbix db
+      tags: import
+      shell: sh -c 'zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql zabbix || /bin/true'
+
+    # https://tecadmin.net/postgresql-allow-remote-connections/ 
+    # - name: Configure database for zabbix server
+    - name: change the listening address from localhost to “*”
+      tags: config
+      lineinfile:
+        path: /etc/postgresql/15/main/postgresql.conf
+        insertbefore: '^#listen_addresses'
+        line: listen_addresses = '*'
+        state: present
+
+    - name: allow server IP address to be connected to the database server
+      tags: config
+      lineinfile:
+        path: /etc/postgresql/15/main/pg_hba.conf
+        line: "host\tall\t\tzabbix\t192.168.56.10/32\tmd5"
+        state: present
+
+    - name: allow front IP address to be connected to the database server
+      tags: config
+      lineinfile:
+        path: /etc/postgresql/15/main/pg_hba.conf
+        line:  "host\tall\t\tzabbix\t192.168.56.12/32\tmd5"
+        state: present
+
+  handlers:
+    - name: restart postgres
+      service: name=postgresql state=restarted
+
+- hosts: front
+  become: yes
+  tasks:
+    - name: install Zabbix packages for frontend
+      tags: zabbix,front
+      apt: "name={{ item }}  state=present"
+      with_items:
+        - zabbix-frontend-php 
+        - php8.2-pgsql 
+        - zabbix-nginx-conf
+        - zabbix-agent
+
+    - name: Configure PHP for Zabbix frontend 'listen'
+      tags: conf
+      lineinfile:
+        path: /etc/zabbix/nginx.conf
+        regexp: '^\tlisten'
+        line:  'listen 80;'
+        state: present
+
+    - name: Configure PHP for Zabbix frontend 'server_name'
+      tags: conf
+      lineinfile:
+        path: /etc/zabbix/nginx.conf
+        regexp: '^\tserver_name'
+        line:  "\tserver_name\t192.168.56.12;"
+        state: present
+
+    - name: Copy setup wizard config
+      tags: copy
+      copy:
+        src: zabbix.conf.php
+        dest: /etc/zabbix/web/zabbix.conf.php
+        owner: www-data
+        group: www-data
+        mode: 0600
+
+    - name: Start and enable nginx
+      tags: services
+      service:
+        name: nginx
+        state: restarted 
+        enabled: yes
+
+    - name: Start and enable php8.2-fpm
+      tags: services
+      service:
+        name: php8.2-fpm
+        state: restarted 
+        enabled: yes
+
+- hosts: server
+  become: yes
+  tasks:
+    - name: Start zabbix server 
+      tags: services
+      service:
+        name: zabbix-server
+        state: restarted 
+        enabled: yes
+
+- hosts: all
+  become: yes
+  tasks:
+    - name: Start and enable zabbix agent 
+      tags: services
+      service:
+        name: zabbix-agent
+        state: restarted 
+        enabled: yes
+
