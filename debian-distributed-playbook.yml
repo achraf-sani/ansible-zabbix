@@ -19,16 +19,19 @@
       command: localectl set-locale LANG=en_US.UTF-8 
 
     - name: install updates
+      tags: package
       apt: 
         upgrade: yes
         update_cache: yes
       when: ansible_distribution == "Debian"
 
     - name: Install Zabbix repository
+      tags: package
       apt:
         deb: https://repo.zabbix.com/zabbix/6.4/debian/pool/main/z/zabbix-release/zabbix-release_6.4-1+debian12_all.deb
 
     - name: Update cache
+      tags: package
       apt:
         update_cache: yes
 
@@ -38,6 +41,7 @@
   become: true
   tasks:
     - name: Install zabbix server
+      tags: package
       apt: 
         name:
           - zabbix-server-pgsql
@@ -67,7 +71,7 @@
 
   pre_tasks:
     - name: Install postgres packages
-      tags: postgres
+      tags: postgres,package
       apt: "name={{ item }} state=present"
       with_items:
         - postgresql
@@ -75,7 +79,7 @@
         - python3-psycopg2
 
     - name: Install ZABBIX packages
-      tags: zabbix
+      tags: zabbix,package
       apt: "name={{ item }}  state=present"
       with_items:
         - zabbix-sql-scripts 
@@ -142,16 +146,18 @@
         path: /etc/postgresql/15/main/pg_hba.conf
         line:  "host\tall\t\tzabbix\t192.168.56.12/32\tmd5"
         state: present
+      notify:
+      - Restart postgres
 
   handlers:
-    - name: restart postgres
+    - name: Restart postgres
       service: name=postgresql state=restarted
 
 - hosts: front
   become: yes
   tasks:
     - name: install Zabbix packages for frontend
-      tags: zabbix,front
+      tags: zabbix,front,package
       apt: "name={{ item }}  state=present"
       with_items:
         - zabbix-frontend-php 
@@ -163,15 +169,15 @@
       tags: conf
       lineinfile:
         path: /etc/zabbix/nginx.conf
-        regexp: '^\tlisten'
-        line:  'listen 80;'
+        regexp: '^#\s*listen\s+\d+;'
+        line:  "\tlisten\t80;"
         state: present
 
     - name: Configure PHP for Zabbix frontend 'server_name'
       tags: conf
       lineinfile:
         path: /etc/zabbix/nginx.conf
-        regexp: '^\tserver_name'
+        regexp: '^#\s*server_name\s+([^\s;]+)\s*;'
         line:  "\tserver_name\t192.168.56.12;"
         state: present
 
@@ -208,13 +214,136 @@
         state: restarted 
         enabled: yes
 
-- hosts: all
+
+- name: Install zabbix agent on a Debian server
+  hosts: front,db,monitored
+  tags: monitor
   become: yes
   tasks:
+    - name: Install zabbix-agent
+      tags: package
+      apt:
+        name: zabbix-agent
+        state: present
+
+    - name: Configure server IP for agent
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^Server="
+        line: Server=192.168.56.10
+        state: present
+
+    - name: Configure server port for agent
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^# ListenPort="
+        line: ListenPort=10050
+        state: present
+
+- name: Add host to Zabbix dashboard
+  tags: host
+  hosts: front
+  become: yes
+  tasks:
+    - name: Set credentials to access Zabbix Server API
+      set_fact:
+        ansible_user: Admin
+        ansible_httpapi_pass: zabbix
+
+    - name: Create Debian server test host
+    # Set task level following variables for Zabbix Server host in task
+      vars:
+        ansible_network_os: community.zabbix.zabbix
+        ansible_connection: httpapi
+          #ansible_httpapi_port: 443
+          #ansible_httpapi_use_ssl: false
+          #ansible_httpapi_validate_certs: false
+        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
+      become: false
+      community.zabbix.zabbix_host:
+        host_name: Debian server
+        description: Debian test server
+        host_groups:
+          - Linux servers
+        link_templates:
+          - Linux by Zabbix agent
+        status: enabled
+        state: present
+        interfaces:
+          - type: 1
+            main: 1
+            useip: 1
+            ip: 192.168.56.20
+            dns: ""
+            port: "10050"
+
+    - name: Create host for database server
+    # Set task level following variables for Zabbix Server host in task
+      vars:
+        ansible_network_os: community.zabbix.zabbix
+        ansible_connection: httpapi
+          #ansible_httpapi_port: 443
+          #ansible_httpapi_use_ssl: false
+          #ansible_httpapi_validate_certs: false
+        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
+      become: false
+      community.zabbix.zabbix_host:
+        host_name: Zabbix database
+        description: Zabbix PostgreSQL database
+        host_groups:
+          - Databases
+        link_templates:
+          - PostgreSQL by Zabbix agent
+        status: enabled
+        state: present
+        interfaces:
+          - type: 1
+            main: 1
+            useip: 1
+            ip: 192.168.56.11
+            dns: ""
+            port: "10050"
+
+    - name: Create host for Frontend (Nginx)
+    # Set task level following variables for Zabbix Server host in task
+      vars:
+        ansible_network_os: community.zabbix.zabbix
+        ansible_connection: httpapi
+          #ansible_httpapi_port: 443
+          #ansible_httpapi_use_ssl: false
+          #ansible_httpapi_validate_certs: false
+        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
+      become: false
+      community.zabbix.zabbix_host:
+        host_name: Zabbix front
+        description: Zabbix Nginx server
+        host_groups:
+          - Linux servers
+        link_templates:
+          - Nginx by Zabbix agent
+        status: enabled
+        state: present
+        interfaces:
+          - type: 1
+            main: 1
+            useip: 1
+            ip: 192.168.56.12
+            dns: ""
+            port: "10050"
+
+- hosts: all
+  gather_facts: no
+  tags: agentservice
+  become: yes
+  tasks:
+    # temporary fix
+    - name: Set credentials back (temporary fix)
+      set_fact:
+        ansible_user: vagrant
+          
     - name: Start and enable zabbix agent 
       tags: services
       service:
         name: zabbix-agent
         state: restarted 
         enabled: yes
-
