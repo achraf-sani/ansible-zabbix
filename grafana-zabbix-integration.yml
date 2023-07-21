@@ -1,0 +1,71 @@
+---
+- name: Grafana & Zabbix integration
+  hosts: grafana
+  become: yes
+
+  vars_files:
+    - my_vault.yml
+  vars:
+    - ansible_become_pass: "{{ su_password }}"
+
+  pre_tasks:
+    - name: Ensure the locale exists
+      tags: locale
+      locale_gen:
+        name: en_US.UTF-8
+        state: present
+    - name: set default locale
+      tags: locale
+      command: localectl set-locale LANG=en_US.UTF-8
+      changed_when: false
+
+    - name: install updates
+      tags: apt,package
+      apt:
+        upgrade: yes
+        update_cache: yes
+
+  tasks:
+    - name: install Grafana package
+      apt:
+        deb: https://dl.grafana.com/enterprise/release/grafana-enterprise_10.0.2_amd64.deb
+        state: present
+
+    - name: Start and enable Grafana
+      service:
+        name: grafana-server
+        state: started
+        enabled: yes
+
+    # - name: install zabbix plugin
+      # command: grafana-cli plugins install alexanderzobnin-zabbix-app
+
+    - name: Install/update Grafana Zabbix plugin
+      community.grafana.grafana_plugin:
+        name: alexanderzobnin-zabbix-app
+        version: latest
+        state: present
+
+    - name: Restart Grafana
+      service: 
+        name: grafana-server
+        state: restarted
+
+    - name: Wait for Grafana to restart
+      wait_for:
+        timeout: 10
+
+    - name: Create Zabbix datasource
+      tags: data
+      community.grafana.grafana_datasource:
+        name: "datasource-zabbix"
+        grafana_url: "http://192.168.56.25:3000"
+        grafana_user: "admin"
+        grafana_password: "admin"
+        ds_type: "alexanderzobnin-zabbix-datasource"
+        ds_url: "http://192.168.56.12/api_jsonrpc.php"
+        zabbix_user: "Admin"
+        zabbix_password: "zabbix"
+        trends: true
+        time_field: "@timestamp"
+        access: direct
