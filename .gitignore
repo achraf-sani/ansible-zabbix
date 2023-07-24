@@ -3,3 +3,7 @@ test.yml
 my_vault.yml
 vault_pass.txt
 files/zabbix.conf.php
+reset_ssh.sh
+redeploy-grafana-vm.sh
+.grafana.yml.swp
+debian-add-hosts.yml
