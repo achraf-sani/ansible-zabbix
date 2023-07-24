@@ -52,7 +52,7 @@
       lineinfile:
         path: /etc/zabbix/zabbix_server.conf 
         regexp: "^# DBHost="
-        line: DBHost=192.168.56.11
+        line: DBHost={{ groups['database'][0] }}
         state: present
 
     - name: Configure the database for ZABBIX server - set password
@@ -64,7 +64,7 @@
         state: present
 
 
-- hosts: db
+- hosts: database
   become: true
   vars_files:
     - vars.yml
@@ -137,14 +137,14 @@
       tags: config
       lineinfile:
         path: /etc/postgresql/15/main/pg_hba.conf
-        line: "host\tall\t\tzabbix\t192.168.56.10/32\tmd5"
+        line: "host\tall\t\tzabbix\t{{ groups['server'][0] }}/32\tmd5"
         state: present
 
     - name: allow front IP address to be connected to the database server
       tags: config
       lineinfile:
         path: /etc/postgresql/15/main/pg_hba.conf
-        line:  "host\tall\t\tzabbix\t192.168.56.12/32\tmd5"
+        line:  "host\tall\t\tzabbix\t{{ groups['front'][0] }}/32\tmd5"
         state: present
       notify:
       - Restart postgres
@@ -178,7 +178,7 @@
       lineinfile:
         path: /etc/zabbix/nginx.conf
         regexp: '^#\s*server_name\s+([^\s;]+)\s*;'
-        line:  "\tserver_name\t192.168.56.12;"
+        line:  "\tserver_name\t{{ groups['front'][0] }};"
         state: present
 
     - name: Copy setup wizard config
@@ -216,7 +216,7 @@
 
 
 - name: Install zabbix agent on a Debian server
-  hosts: front,db,monitored
+  hosts: front,database,monitored
   tags: monitor
   become: yes
   tasks:
@@ -230,7 +230,7 @@
       lineinfile:
         path: /etc/zabbix/zabbix_agentd.conf
         regexp: "^Server="
-        line: Server=192.168.56.10
+        line: Server={{ groups['server'][0] }}
         state: present
 
     - name: Configure server port for agent
@@ -300,7 +300,7 @@
           - type: 1
             main: 1
             useip: 1
-            ip: 192.168.56.11
+            ip: "{{ groups['database'][0] }}"
             dns: ""
             port: "10050"
 
@@ -327,7 +327,7 @@
           - type: 1
             main: 1
             useip: 1
-            ip: 192.168.56.12
+            ip: "{{ groups['front'][0] }}"
             dns: ""
             port: "10050"
 
