@@ -15,6 +15,7 @@
       locale_gen:
         name: en_US.UTF-8
         state: present
+
     - name: set default locale
       tags: locale
       command: localectl set-locale LANG=en_US.UTF-8 
@@ -26,6 +27,16 @@
         update_cache: yes
       when: ansible_distribution == "Debian"
 
+    # [WARNING]: Module remote_tmp /root/.ansible/tmp did not exist and was created
+    # with a mode of 0700, this may cause issues when running as another user. To
+    # avoid this, create the remote_tmp dir with the correct permissions manually
+    - name: Create remote_tmp directory
+      ansible.builtin.file:
+        path: /root/.ansible/remote_tmp
+        state: directory
+        mode: "1777"
+
+  tasks:
     - name: Install Zabbix repository
       tags: package
       apt:
@@ -42,7 +53,6 @@
         name:
           - zabbix-server-pgsql
           - zabbix-agent
-
 
     - name: Configure the database for ZABBIX server - set password
       tags: config
@@ -68,25 +78,7 @@
         - zabbix-frontend-php 
         - php8.2-pgsql 
         - zabbix-nginx-conf
-        - zabbix-agent
-
-    #     - name: Find out if PostgreSQL is initialized
-    #       ansible.builtin.stat:
-    #         path: "/var/lib/pgsql/data/pg_hba.conf"
-    #       register: postgres_data
-    # 
-    #     - name: Initialize PostgreSQL
-    #       shell: "postgresql-setup initdb"
-    #       when: not postgres_data.stat.exists
-    # 
-    #     - name: Start and enable PostgreSQL service 
-    #       service: "name={{ item }} state=started enabled=yes"
-    #       with_items:
-    #         - postgresql
-    #
-    # Not needed for Debian since postgres is already set up and running
-    # https://superuser.com/questions/513386/setting-up-postgresql-gives-error-sudo-initdb-command-not-found
-    
+  
     - name: Create PostgreSQL user zabbix
       tags: createpostgres
       become_user: postgres
@@ -120,13 +112,13 @@
       lineinfile:
         path: /etc/zabbix/nginx.conf
         regexp: '^#\s*server_name\s+([^\s;]+)\s*;'
-        line:  "\tserver_name\t192.168.56.30;"
+        line:  "\tserver_name\t{{ groups['allinone'][0] }};"
         state: present
 
     - name: Copy setup wizard config
       tags: copy
       copy:
-        src: zabbix.conf.php
+        src: zabbix-all.conf.php
         dest: /etc/zabbix/web/zabbix.conf.php
         owner: www-data
         group: www-data
@@ -153,119 +145,29 @@
         state: restarted 
         enabled: yes
 
-    - name: Set credentials to access Zabbix Server API
-      set_fact:
-        ansible_user: Admin
-        ansible_httpapi_pass: zabbix
 
-    - name: Create Debian server test host
-    # Set task level following variables for Zabbix Server host in task
-      vars:
-        ansible_network_os: community.zabbix.zabbix
-        ansible_connection: httpapi
-          #ansible_httpapi_port: 443
-          #ansible_httpapi_use_ssl: false
-          #ansible_httpapi_validate_certs: false
-        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
-      become: false
-      community.zabbix.zabbix_host:
-        host_name: Debian server
-        description: Debian test server
-        host_groups:
-          - Linux servers
-        link_templates:
-          - Linux by Zabbix agent
-        status: enabled
-        state: present
-        interfaces:
-          - type: 1
-            main: 1
-            useip: 1
-            ip: 192.168.56.20
-            dns: ""
-            port: "10050"
-
-    - name: Create host for database server
-    # Set task level following variables for Zabbix Server host in task
-      vars:
-        ansible_network_os: community.zabbix.zabbix
-        ansible_connection: httpapi
-          #ansible_httpapi_port: 443
-          #ansible_httpapi_use_ssl: false
-          #ansible_httpapi_validate_certs: false
-        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
-      become: false
-      community.zabbix.zabbix_host:
-        host_name: Zabbix database
-        description: Zabbix PostgreSQL database
-        host_groups:
-          - Databases
-        link_templates:
-          - PostgreSQL by Zabbix agent
-        status: enabled
-        state: present
-        interfaces:
-          - type: 1
-            main: 1
-            useip: 1
-            ip: "{{ groups['database'][0] }}"
-            dns: ""
-            port: "10050"
-
-    - name: Create host for Frontend (Nginx)
-    # Set task level following variables for Zabbix Server host in task
-      vars:
-        ansible_network_os: community.zabbix.zabbix
-        ansible_connection: httpapi
-          #ansible_httpapi_port: 443
-          #ansible_httpapi_use_ssl: false
-          #ansible_httpapi_validate_certs: false
-        ansible_zabbix_url_path: ""  # If Zabbix WebUI runs on non-default (zabbix) path ,e.g. http://<FQDN>/zabbixeu
-      become: false
-      community.zabbix.zabbix_host:
-        host_name: Zabbix front
-        description: Zabbix Nginx server
-        host_groups:
-          - Linux servers
-        link_templates:
-          - Nginx by Zabbix agent
-        status: enabled
-        state: present
-        interfaces:
-          - type: 1
-            main: 1
-            useip: 1
-            ip: "{{ groups['front'][0] }}"
-            dns: ""
-            port: "10050"
-
-- hosts: all
-  gather_facts: no
-  tags: agentservice
-  become: yes
-  tasks:
-    # temporary fix
-    - name: Set credentials back (temporary fix)
-      set_fact:
-        ansible_user: vagrant
-          
-    - name: Start and enable zabbix agent 
-      tags: services
-      service:
-        name: zabbix-agent
-        state: restarted 
-        enabled: yes
 - name: Grafana & Zabbix integration
+  tags: grafana
   hosts: allinone
   become: yes
 
+  vars_files:
+    - my_vault.yml
+    - vars.yml
+
+  vars:
+    - ansible_become_pass: "{{ su_password }}"
+
   tasks:
     - name: install Grafana package
+      tags: grafana
       apt:
         deb: https://dl.grafana.com/enterprise/release/grafana-enterprise_10.0.2_amd64.deb
         state: present
 
     - name: Start and enable Grafana
+      tags: grafana
+
       service:
         name: grafana-server
         state: started
@@ -275,29 +177,32 @@
       # command: grafana-cli plugins install alexanderzobnin-zabbix-app
 
     - name: Install/update Grafana Zabbix plugin
+      tags: grafana
       community.grafana.grafana_plugin:
         name: alexanderzobnin-zabbix-app
         version: latest
         state: present
 
     - name: Restart Grafana
+      tags: grafana
       service: 
         name: grafana-server
         state: restarted
 
     - name: Wait for Grafana to restart
+      tags: grafana
       wait_for:
         timeout: 10
 
     - name: Create Zabbix datasource
-      tags: data
+      tags: grafana
       community.grafana.grafana_datasource:
         name: "datasource-zabbix"
-        grafana_url: "http://192.168.56.30:3000"
+        grafana_url: "http://{{ groups['allinone'][0] }}:3000"
         grafana_user: "admin"
         grafana_password: "admin"
         ds_type: "alexanderzobnin-zabbix-datasource"
-        ds_url: "http://192.168.56.30/api_jsonrpc.php"
+        ds_url: "http://{{ groups['allinone'][0] }}/api_jsonrpc.php"
         zabbix_user: "Admin"
         zabbix_password: "zabbix"
         trends: true
