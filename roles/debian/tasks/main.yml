@@ -1,0 +1,16 @@
+---
+- name: Ensure the locale exists
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: set default locale
+  command: localectl set-locale LANG=en_US.UTF-8 
+
+- name: install updates
+  apt: 
+    upgrade: yes
+    update_cache: yes
+
+# name: Install ZABBIX server for Debian
+#   import_tasks: debian.yml

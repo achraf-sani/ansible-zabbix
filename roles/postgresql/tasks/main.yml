@@ -1,0 +1,29 @@
+---
+- name: Install postgres packages
+  tags: postgres,package
+  apt: "name={{ item }} state=present"
+  with_items:
+    - postgresql
+    - postgresql-client
+    - python3-psycopg2
+    - zabbix-sql-scripts 
+
+- name: Create PostgreSQL user zabbix
+  tags: createpostgres
+  become_user: postgres
+  postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    state: present
+
+- name: Create PostgreSQL database 'zabbix'
+  become: yes
+  become_user: postgres
+  ansible.builtin.postgresql_db:
+    name: zabbix
+    owner: zabbix
+    state: present
+
+- name: Import zabbix db
+  tags: import
+  shell: sh -c 'zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql zabbix || /bin/true'

@@ -1,0 +1,42 @@
+---
+- name: Install ZABBIX packages
+  apt: "name={{ item }}  state=present"
+  with_items:
+    - zabbix-frontend-php 
+    - php8.2-pgsql 
+    - zabbix-nginx-conf
+
+- name: Configure PHP for Zabbix frontend 'listen'
+  lineinfile:
+    path: /etc/zabbix/nginx.conf
+    regexp: '^#\s*listen\s+\d+;'
+    line:  "\tlisten\t80;"
+    state: present
+
+- name: Configure PHP for Zabbix frontend 'server_name'
+  lineinfile:
+    path: /etc/zabbix/nginx.conf
+    regexp: '^#\s*server_name\s+([^\s;]+)\s*;'
+    line:  "\tserver_name\t{{ groups['allinone'][0] }};"
+    state: present
+
+- name: Copy setup wizard config
+  copy:
+    src: zabbix-all.conf.php
+    dest: /etc/zabbix/web/zabbix.conf.php
+    owner: www-data
+    group: www-data
+    mode: 0600
+  notify: restart_zabbix_server
+
+- name: Start and enable nginx
+  service:
+    name: nginx
+    state: restarted 
+    enabled: yes
+
+- name: Start and enable php8.2-fpm
+  service:
+    name: php8.2-fpm
+    state: restarted 
+    enabled: yes

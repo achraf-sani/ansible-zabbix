@@ -1,0 +1,43 @@
+---
+- name: install Grafana package
+  package:
+    deb: https://dl.grafana.com/enterprise/release/grafana-enterprise_10.0.2_amd64.deb
+    state: present
+
+- name: Start and enable Grafana
+  service:
+    name: grafana-server
+    state: started
+    enabled: yes
+
+    # - name: install zabbix plugin
+      # command: grafana-cli plugins install alexanderzobnin-zabbix-app
+
+- name: Install/update Grafana Zabbix plugin
+  community.grafana.grafana_plugin:
+    name: alexanderzobnin-zabbix-app
+    version: latest
+    state: present
+
+- name: Restart Grafana
+  service: 
+    name: grafana-server
+    state: restarted
+
+- name: Wait for Grafana to restart
+  wait_for:
+    timeout: 10
+
+- name: Create Zabbix datasource
+  community.grafana.grafana_datasource:
+    name: "datasource-zabbix"
+    grafana_url: "http://{{ groups['allinone'][0] }}:3000"
+    grafana_user: "admin"
+    grafana_password: "admin"
+    ds_type: "alexanderzobnin-zabbix-datasource"
+    ds_url: "http://{{ groups['allinone'][0] }}/api_jsonrpc.php"
+    zabbix_user: "Admin"
+    zabbix_password: "zabbix"
+    trends: true
+    time_field: "@timestamp"
+    access: direct
