@@ -273,7 +273,7 @@
           - type: 1
             main: 1
             useip: 1
-            ip: 192.168.56.20
+            ip: "{{ groups['monitored'][0] }}" 
             dns: ""
             port: "10050"
 
