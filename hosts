@@ -16,5 +16,20 @@
 [allinone]
 192.168.56.30
 
+[almalinux:children]
+zabbixserver-alma
+zabbixdb-alma
+zabbixfront-alma
+
+[zabbixserver-alma]
+192.168.56.41
+[zabbixdb-alma]
+192.168.56.42
+[zabbixfront-alma]
+192.168.56.43
+
+[alma-allinone]
+192.168.56.33
+
 [test]
 192.168.1.155
