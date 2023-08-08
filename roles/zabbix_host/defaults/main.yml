@@ -1,0 +1,33 @@
+---
+- name: Set credentials to access Zabbix Server API
+  set_fact:
+    ansible_user: Admin
+    ansible_httpapi_pass: zabbix
+
+- name: Create a new host or rewrite an existing host's info
+  vars:
+    ansible_network_os: community.zabbix.zabbix
+    ansible_connection: httpapi
+    ansible_httpapi_port: 443
+    ansible_httpapi_use_ssl: true
+    ansible_httpapi_validate_certs: false
+    ansible_zabbix_url_path: ""  # On NginX
+  become: false
+  community.zabbix.zabbix_host:
+    host_name: test_server
+    visible_name: Debian Server
+    description: ""
+    host_groups:
+      - Linux servers
+    link_templates:
+      - Linux by Zabbix agent
+    status: enabled
+    state: present
+    inventory_mode: automatic
+    interfaces:
+      - type: 1
+        main: 1
+        useip: 1
+        ip: 192.168.56.13
+        dns: ""
+        port: "10050"
